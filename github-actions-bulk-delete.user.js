@@ -2,7 +2,7 @@
 // @name         GitHub Actions Bulk Delete
 // @namespace    kooraseru
 // @author       kooraseru (https://github.com/Kooraseru)
-// @version      0.9.1
+// @version      0.9.2
 // @description  Select workflow runs across pages and delete them concurrently using your GitHub session.
 // @match        https://github.com/*/*/actions*
 // @updateURL    https://raw.githubusercontent.com/Kooraseru/github-actions-bulk-delete/main/github-actions-bulk-delete.user.js
@@ -32,6 +32,20 @@
         #ghabd-controls { display: inline-flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; max-width: 100%; }
         #ghabd-controls input[type="checkbox"] { margin: 0; }
         #ghabd-status { max-width: 280px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+        #ghabd-select { position: relative; }
+        #ghabd-select-menu { position: absolute; z-index: 100; right: 0; top: calc(100% + 4px);
+            min-width: 190px; padding: 4px; border-radius: 6px;
+            border: 1px solid var(--borderColor-default, var(--color-border-default));
+            background: var(--bgColor-default, var(--color-canvas-default));
+            box-shadow: var(--shadow-floating-small, 0 8px 24px rgba(0, 0, 0, .18)); }
+        #ghabd-select-menu[hidden] { display: none !important; }
+        #ghabd-select-menu [role="menuitem"] { display: block; width: 100%; border: 0;
+            padding: 8px 12px; border-radius: 4px; text-align: left; cursor: pointer;
+            color: var(--fgColor-default, var(--color-fg-default)); background: transparent; }
+        #ghabd-select-menu [role="menuitem"]:hover,
+        #ghabd-select-menu [role="menuitem"]:focus-visible {
+            background: var(--bgColor-muted, var(--color-canvas-subtle)); }
+        #ghabd-select-menu [role="menuitem"]:disabled { opacity: .5; cursor: not-allowed; }
         .ghabd-row { position: relative !important; padding-left: 48px !important; }
         .ghabd-check { position: absolute !important; left: 16px !important; top: 50% !important;
             transform: translateY(-50%) !important; margin: 0 !important; width: 16px; height: 16px;
@@ -106,13 +120,13 @@
         const panel = document.getElementById('ghabd-controls');
         if (!panel || panel.dataset.repo !== ctx.key) return;
         const ids = visibleIds().filter(id => !s.deleted.has(id));
-        const count = ids.filter(id => s.selected.has(id)).length;
         const locked = s.busy || s.scanning;
-        const all = panel.querySelector('#ghabd-all');
-        all.checked = ids.length > 0 && count === ids.length;
-        all.indeterminate = count > 0 && count < ids.length;
-        all.disabled = locked || ids.length === 0;
-        panel.querySelector('#ghabd-scan').disabled = locked;
+        panel.querySelector('#ghabd-select-toggle').disabled = locked;
+        panel.querySelector('#ghabd-select-page').disabled = locked || ids.length === 0;
+        panel.querySelector('#ghabd-select-time').disabled = locked;
+        panel.querySelector('#ghabd-select-time').title =
+            `Select all runs in ${location.pathname.includes('/actions/workflows/') ? 'this workflow' : 'all workflows'} across all pages (honors current filters)`;
+        if (locked) setMenuOpen(panel, false);
         panel.querySelector('#ghabd-clear').disabled = locked || s.selected.size === 0;
         const remove = panel.querySelector('#ghabd-delete');
         remove.disabled = locked || s.selected.size === 0;
@@ -135,6 +149,27 @@
         }
     }
 
+    function setMenuOpen(panel, open) {
+        const menu = panel?.querySelector('#ghabd-select-menu');
+        const toggle = panel?.querySelector('#ghabd-select-toggle');
+        if (!menu || !toggle) return;
+        menu.hidden = !open;
+        toggle.setAttribute('aria-expanded', String(open));
+    }
+
+    function selectVisible(ctx) {
+        const s = state(ctx);
+        if (s.busy || s.scanning) return;
+        let count = 0;
+        for (const id of visibleIds()) {
+            if (s.deleted.has(id)) continue;
+            s.selected.add(id);
+            count++;
+        }
+        show(ctx, `Selected ${count} runs on this page.`);
+        update();
+    }
+
     function createControls(ctx) {
         // Never fall back to the results list: controls belong in GitHub's
         // PageHeader actions beside "New workflow", not under the filters.
@@ -155,23 +190,51 @@
         panel.id = 'ghabd-controls';
         panel.dataset.repo = ctx.key;
         panel.className = 'd-flex flex-items-center gap-2';
-        const label = document.createElement('label');
-        label.className = 'd-inline-flex flex-items-center gap-2';
-        const all = document.createElement('input');
-        all.type = 'checkbox';
-        all.id = 'ghabd-all';
-        label.append(all, document.createTextNode('All on page'));
-        all.addEventListener('change', () => {
-            const s = state(ctx);
-            for (const id of visibleIds()) {
-                if (s.deleted.has(id)) continue;
-                if (all.checked) s.selected.add(id);
-                else s.selected.delete(id);
-            }
-            update();
+        // One selection dropdown replaces the page checkbox and the separate
+        // all-pages scan button. Both actions apply to the current Actions view.
+        const chooser = document.createElement('div');
+        chooser.id = 'ghabd-select';
+        const toggle = button('Select runs', 'ghabd-select-toggle');
+        toggle.setAttribute('aria-haspopup', 'menu');
+        toggle.setAttribute('aria-expanded', 'false');
+        toggle.setAttribute('aria-controls', 'ghabd-select-menu');
+        const arrow = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        arrow.setAttribute('viewBox', '0 0 16 16');
+        arrow.setAttribute('width', '16');
+        arrow.setAttribute('height', '16');
+        arrow.setAttribute('aria-hidden', 'true');
+        arrow.style.marginLeft = '6px';
+        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        path.setAttribute('fill', 'currentColor');
+        path.setAttribute('d', 'm4.427 7.427 3.396 3.396a.25.25 0 0 0 .354 0l3.396-3.396A.25.25 0 0 0 11.396 7H4.604a.25.25 0 0 0-.177.427Z');
+        arrow.append(path);
+        toggle.append(arrow);
+        const menu = document.createElement('div');
+        menu.id = 'ghabd-select-menu';
+        menu.setAttribute('role', 'menu');
+        menu.setAttribute('aria-label', 'Select workflow runs');
+        menu.hidden = true;
+        const option = (id, title, action) => {
+            const item = document.createElement('button');
+            item.id = id;
+            item.type = 'button';
+            item.setAttribute('role', 'menuitem');
+            item.textContent = title;
+            item.addEventListener('click', () => {
+                setMenuOpen(panel, false);
+                action();
+            });
+            menu.append(item);
+            return item;
+        };
+        option('ghabd-select-page', 'All on page', () => selectVisible(ctx));
+        option('ghabd-select-time', 'All time', () => selectAllRuns(ctx));
+        toggle.addEventListener('click', () => {
+            if (toggle.disabled) return;
+            setMenuOpen(panel, menu.hidden);
+            if (!menu.hidden) menu.querySelector('[role="menuitem"]:not(:disabled)')?.focus();
         });
-        const scan = button('Select all runs', 'ghabd-scan');
-        scan.addEventListener('click', () => selectAllRuns(ctx));
+        chooser.append(toggle, menu);
         const clear = button('Clear', 'ghabd-clear');
         clear.addEventListener('click', () => {
             state(ctx).selected.clear();
@@ -183,7 +246,7 @@
         status.id = 'ghabd-status';
         status.className = 'color-fg-muted text-small';
         status.setAttribute('role', 'status');
-        panel.append(label, scan, clear, remove, status);
+        panel.append(chooser, clear, remove, status);
         actions.classList.add('ghabd-actions-host');
         actions.prepend(panel);
     }
@@ -228,10 +291,18 @@
         update();
         const ids = new Set();
         let pageSize = 0;
+        const view = new URL(location.href);
+        view.searchParams.delete('page');
+        view.hash = '';
         try {
             for (let page = 1; page <= MAX_SCAN_PAGES; page++) {
-                const url = new URL(location.href);
-                if (context()?.key !== ctx.key) throw new Error('Repository changed');
+                const current = new URL(location.href);
+                current.searchParams.delete('page');
+                current.hash = '';
+                if (current.href !== view.href || context()?.key !== ctx.key) {
+                    throw new Error('Actions view changed; selection cancelled');
+                }
+                const url = new URL(view.href);
                 url.searchParams.set('page', String(page));
                 show(ctx, `Scanning runs: page ${page} (${ids.size} found)...`);
                 const response = await fetch(url, {
@@ -242,9 +313,8 @@
                     throw new Error(`Could not read Actions page ${page} (HTTP ${response.status})`);
                 }
                 const returned = new URL(response.url);
-                if (returned.origin !== location.origin ||
-                    !returned.pathname.startsWith(`/${ctx.owner}/${ctx.repo}/actions`)) {
-                    throw new Error('GitHub redirected the scan outside the repository');
+                if (returned.origin !== location.origin || returned.pathname !== view.pathname) {
+                    throw new Error('GitHub redirected the scan away from this Actions view');
                 }
                 const doc = new DOMParser().parseFromString(await response.text(), 'text/html');
                 const list = doc.querySelector(LIST);
@@ -359,6 +429,21 @@
             update();
         }
     }
+
+    document.addEventListener('click', event => {
+        const panel = document.getElementById('ghabd-controls');
+        if (panel && !panel.querySelector('#ghabd-select')?.contains(event.target)) {
+            setMenuOpen(panel, false);
+        }
+    });
+    document.addEventListener('keydown', event => {
+        if (event.key !== 'Escape') return;
+        const panel = document.getElementById('ghabd-controls');
+        if (panel?.querySelector('#ghabd-select-menu')?.hidden === false) {
+            setMenuOpen(panel, false);
+            panel.querySelector('#ghabd-select-toggle')?.focus();
+        }
+    });
 
     const observer = new MutationObserver(changes => {
         if (changes.every(change =>

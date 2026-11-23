@@ -16,8 +16,8 @@ Automatic updates use the userscript's `@updateURL` and `@downloadURL`; the curr
 
 The controls appear in GitHub's page-header action area, beside **New workflow**, not inside the run list or filters.
 
-- **Select runs ▾ → All on page:** Select only the runs currently displayed on this page.
-- **Select runs ▾ → All time:** Select every available run across the current view's pages. On an individual workflow page it selects runs for **that workflow only**; on **All workflows** it selects across all workflows. Active URL filters are preserved. Scanning stops on unexpected responses, redirects to another view, or repeated pages rather than silently claiming to have selected everything.
+- **Select runs ▾ → All on Page:** Select only the runs currently displayed on this page.
+- **Select runs ▾ → All Time:** Select every available run across the current view's pages. On an individual workflow page it selects runs for **that workflow only**; on **All workflows** it selects across all workflows. Active URL filters are preserved. Scanning stops on unexpected responses, redirects to another view, or repeated pages rather than silently claiming to have selected everything.
 - **Clear:** Uncheck the current selection without deleting anything.
 - **Delete selected:** Confirm the total once, then send up to **8 concurrent DELETE requests**. GitHub provides a per-run deletion endpoint, not an atomic bulk-delete request.
 

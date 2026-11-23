@@ -2,7 +2,7 @@
 // @name         GitHub Actions Bulk Delete
 // @namespace    kooraseru
 // @author       kooraseru (https://github.com/Kooraseru)
-// @version      0.9.3
+// @version      0.9.4
 // @description  Select workflow runs across pages and delete them concurrently using your GitHub session.
 // @match        https://github.com/*/*/actions*
 // @updateURL    https://raw.githubusercontent.com/Kooraseru/github-actions-bulk-delete/main/github-actions-bulk-delete.user.js
@@ -33,7 +33,6 @@
         #ghabd-select { position: relative; }
         #ghabd-select-menu { position: absolute !important; top: calc(100% + 4px); right: 0; z-index: 1000; min-width: 200px; }
         #ghabd-select-menu[hidden] { display: none !important; }
-        #ghabd-status { max-width: 230px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
         .ghabd-row { position: relative !important; padding-left: 48px !important; }
         .ghabd-check { position: absolute !important; left: 16px !important; top: 50% !important;
             transform: translateY(-50%) !important; margin: 0 !important; width: 16px; height: 16px;
@@ -202,11 +201,11 @@
         path.setAttribute('fill', 'currentColor');
         path.setAttribute('d', 'm4.427 7.427 3.396 3.396a.25.25 0 0 0 .354 0l3.396-3.396A.25.25 0 0 0 11.396 7H4.604a.25.25 0 0 0-.177.427Z');
         arrow.append(path);
-        const trailing = document.createElement('span');
-        trailing.dataset.component = 'trailingAction';
-        trailing.className = 'prc-Button-Visual-YNt2F prc-Button-VisualWrap-E4cnq';
-        trailing.append(arrow);
-        toggle.querySelector('[data-component="buttonContent"]').append(trailing);
+        // GitHub's Add file menu places its chevron inside the text label.
+        // A separate trailingAction gets grid-positioned ahead of the label.
+        arrow.style.marginLeft = '6px';
+        arrow.style.verticalAlign = 'text-bottom';
+        toggle.querySelector('[data-component="text"]').append(arrow);
         // Match the native Primer ActionMenu/ActionList markup supplied by GitHub.
         const menu = document.createElement('div');
         menu.id = 'ghabd-select-menu';
@@ -274,7 +273,7 @@
         remove.addEventListener('click', () => deleteSelected(ctx));
         const status = document.createElement('span');
         status.id = 'ghabd-status';
-        status.className = 'color-fg-muted text-small';
+        status.className = 'sr-only';
         status.setAttribute('role', 'status');
         panel.append(chooser, clear, remove, status);
         actions.classList.add('ghabd-actions-host');
@@ -503,6 +502,12 @@
         } finally {
             s.busy = false;
             update();
+        }
+        // Reload only after ALL workers settle, so GitHub's run count and
+        // empty-state display agree with the server. Preserve the page and
+        // selected failed IDs if any request failed, so they can be retried.
+        if (removed > 0 && failures.length === 0 && context()?.key === ctx.key) {
+            location.reload();
         }
     }
 

@@ -10,18 +10,18 @@ Requires a userscript manager such as [Tampermonkey](https://www.tampermonkey.ne
 
 [Install GitHub Actions Bulk Delete](https://github.com/Kooraseru/github-actions-bulk-delete/raw/refs/heads/main/github-actions-bulk-delete.user.js)
 
-Automatic updates use the userscript's `@updateURL` and `@downloadURL`; the current version is **0.9.0**.
+Automatic updates use the userscript's `@updateURL` and `@downloadURL`; the current version is **0.9.2**.
 
 ## Usage
 
-The controls appear beside the Actions search toolbar instead of inside the workflow-run list.
+The controls appear in GitHub's page-header action area, beside **New workflow**, not inside the run list or filters.
 
-- **All on page:** Check or uncheck the currently visible, non-deleted runs.
-- **Select all runs:** Scan every page of the current Actions view, respecting its URL filters. GitHub's same-origin HTML is read before selection is changed. Scanning stops on unexpected responses or repeated pages rather than silently claiming to have selected everything.
+- **Select runs ▾ → All on page:** Select only the runs currently displayed on this page.
+- **Select runs ▾ → All time:** Select every available run across the current view's pages. On an individual workflow page it selects runs for **that workflow only**; on **All workflows** it selects across all workflows. Active URL filters are preserved. Scanning stops on unexpected responses, redirects to another view, or repeated pages rather than silently claiming to have selected everything.
 - **Clear:** Uncheck the current selection without deleting anything.
 - **Delete selected:** Confirm the total once, then send up to **8 concurrent DELETE requests**. GitHub provides a per-run deletion endpoint, not an atomic bulk-delete request.
 
-Individual deletions succeed or fail independently. Successfully deleted rows stay in the current list, are dimmed, and have unchecked, disabled checkboxes; the script does not reload the page. Failed deletions remain selected for another attempt. Selecting runs across pages does not load those rows into the current list – only the current page's rows are displayed.
+Individual deletions succeed or fail independently. Successfully deleted rows are **removed from the visible list immediately** without reloading the page; their IDs are remembered during the session to suppress stale rows restored by GitHub's auto-refresh. Failed deletions remain visible and selected for retry. Selecting runs across pages does not load those rows into the current list – only the current page's rows are displayed.
 
 Selection and deletion state are held per repository during the current page session. It is not persisted to disk.
 
@@ -35,7 +35,7 @@ The userscript depends on GitHub's rendered Actions list, HTML pagination, Prime
 
 The implementation deliberately fails closed on unreadable pages, unexpected redirects, and unsupported HTTP deletion responses. It does not collect or save session cookies, ask for a PAT, or change workflow definitions. Deleting a workflow run is permanent and removes its logs and artifacts. Use a disposable run to confirm that deletion still works against the live GitHub UI before deleting large batches.
 
-The selection, toolbar placement, concurrency, and success/failure behavior were exercised in a headless Chromium test with mocked GitHub HTML and responses. The authenticated live GitHub endpoint has not been tested here.
+The header dropdown, workflow-scoped pagination, eight concurrent requests, immediate row removal, stale-row suppression, and partial failures were exercised in a headless Chromium test with mocked GitHub HTML and responses. The authenticated live GitHub endpoint has not been tested here.
 
 ## License
 

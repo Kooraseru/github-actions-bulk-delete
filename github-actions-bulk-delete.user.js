@@ -43,7 +43,8 @@
 
     function context() {
         const parts = location.pathname.split('/').filter(Boolean);
-        if (parts.length < 3 || parts[2] !== 'actions') return null;
+        if (parts[2] !== 'actions' ||
+            !(parts.length === 3 || (parts.length === 5 && parts[3] === 'workflows'))) return null;
         const [owner, repo] = parts;
         return { owner, repo, key: `${owner}/${repo}` };
     }
@@ -97,7 +98,10 @@
         s.message = message;
         if (context()?.key === ctx.key) {
             const status = document.getElementById('ghabd-status');
-            if (status) status.textContent = message;
+            if (status) {
+                status.textContent = message;
+                status.title = message;
+            }
         }
     }
 
@@ -142,6 +146,7 @@
         const toggle = panel?.querySelector('#ghabd-select-toggle');
         if (!menu || !toggle) return;
         menu.hidden = !open;
+        menu.toggleAttribute('data-visibility-visible', open);
         toggle.setAttribute('aria-expanded', String(open));
     }
 
@@ -191,12 +196,17 @@
         arrow.setAttribute('width', '16');
         arrow.setAttribute('height', '16');
         arrow.setAttribute('aria-hidden', 'true');
-        arrow.style.marginLeft = '6px';
+        arrow.setAttribute('data-component', 'Octicon');
+        arrow.setAttribute('class', 'octicon octicon-triangle-down');
         const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
         path.setAttribute('fill', 'currentColor');
         path.setAttribute('d', 'm4.427 7.427 3.396 3.396a.25.25 0 0 0 .354 0l3.396-3.396A.25.25 0 0 0 11.396 7H4.604a.25.25 0 0 0-.177.427Z');
         arrow.append(path);
-        toggle.append(arrow);
+        const trailing = document.createElement('span');
+        trailing.dataset.component = 'trailingAction';
+        trailing.className = 'prc-Button-Visual-YNt2F prc-Button-VisualWrap-E4cnq';
+        trailing.append(arrow);
+        toggle.querySelector('[data-component="buttonContent"]').append(trailing);
         // Match the native Primer ActionMenu/ActionList markup supplied by GitHub.
         const menu = document.createElement('div');
         menu.id = 'ghabd-select-menu';
@@ -273,9 +283,13 @@
 
     function enhance() {
         const ctx = context();
-        const list = document.querySelector(LIST);
-        if (!ctx || !list) return;
+        if (!ctx) {
+            document.getElementById('ghabd-controls')?.remove();
+            return;
+        }
         createControls(ctx);
+        // React can display an empty-state illustration instead of a list.
+        // The header controls must still appear, including on a new workflow.
         for (const row of rows()) {
             const id = runId(row);
             if (state(ctx).deleted.has(id)) {

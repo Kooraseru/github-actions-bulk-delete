@@ -2,7 +2,7 @@
 // @name         GitHub Actions Bulk Delete
 // @namespace    kooraseru
 // @author       kooraseru (https://github.com/Kooraseru)
-// @version      0.9.0
+// @version      0.9.1
 // @description  Select workflow runs across pages and delete them concurrently using your GitHub session.
 // @match        https://github.com/*/*/actions*
 // @updateURL    https://raw.githubusercontent.com/Kooraseru/github-actions-bulk-delete/main/github-actions-bulk-delete.user.js
@@ -27,17 +27,15 @@
 
     const css = document.createElement('style');
     css.textContent = `
-        .ghabd-toolbar-host { display: flex !important; align-items: center; flex-wrap: wrap; gap: 12px; }
-        .ghabd-toolbar-host > form { flex: 1 1 320px; min-width: 200px; }
-        #ghabd-controls { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+        /* Attach to GitHub's PageHeader actions, next to "New workflow". */
+        .ghabd-actions-host { display: flex !important; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+        #ghabd-controls { display: inline-flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; max-width: 100%; }
         #ghabd-controls input[type="checkbox"] { margin: 0; }
-        #ghabd-status { min-width: 120px; }
+        #ghabd-status { max-width: 280px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
         .ghabd-row { position: relative !important; padding-left: 48px !important; }
         .ghabd-check { position: absolute !important; left: 16px !important; top: 50% !important;
             transform: translateY(-50%) !important; margin: 0 !important; width: 16px; height: 16px;
             cursor: pointer; z-index: 1; }
-        .ghabd-row.ghabd-deleted { opacity: .55; }
-        .ghabd-row.ghabd-deleted .ghabd-check { cursor: not-allowed; }
     `;
     document.head.append(css);
 
@@ -123,32 +121,35 @@
         panel.querySelector('#ghabd-status').textContent = s.message;
         for (const row of rows()) {
             const id = runId(row);
-            const deleted = s.deleted.has(id);
-            row.classList.toggle('ghabd-deleted', deleted);
+            // React may briefly restore an old item during an auto-refresh.
+            // A successful deletion must disappear immediately and stay gone.
+            if (s.deleted.has(id)) {
+                row.remove();
+                continue;
+            }
             const input = row.querySelector('.ghabd-check');
             if (!input) continue;
-            input.checked = !deleted && s.selected.has(id);
-            input.disabled = locked || deleted;
-            input.title = deleted ? 'Deleted' : `Select workflow run ${id}`;
+            input.checked = s.selected.has(id);
+            input.disabled = locked;
+            input.title = `Select workflow run ${id}`;
         }
     }
 
-    function toolbarAnchor(list) {
-        const search = document.querySelector(
-            'input[placeholder="Search runs"], input[aria-label="Search runs"], input[placeholder*="Search workflow"]'
+    function createControls(ctx) {
+        // Never fall back to the results list: controls belong in GitHub's
+        // PageHeader actions beside "New workflow", not under the filters.
+        const actions = document.querySelector(
+            'header[data-component="PageLayout.Header"] [data-component="PH_Actions"]'
         );
-        const form = search?.closest('form');
-        if (form?.parentElement && !list.contains(form)) {
-            form.parentElement.classList.add('ghabd-toolbar-host');
-            return { node: form, position: 'after' };
-        }
-        // A GitHub layout change must not put the controls inside the run list.
-        return { node: list, position: 'before' };
-    }
-
-    function createControls(ctx, list) {
+        if (!actions) return;
         const old = document.getElementById('ghabd-controls');
-        if (old?.dataset.repo === ctx.key) return;
+        if (old?.dataset.repo === ctx.key) {
+            // A previously mounted panel may need relocating after a GitHub
+            // client-side route change or header reconstruction.
+            if (old.parentElement !== actions) actions.prepend(old);
+            actions.classList.add('ghabd-actions-host');
+            return;
+        }
         old?.remove();
         const panel = document.createElement('div');
         panel.id = 'ghabd-controls';
@@ -183,18 +184,21 @@
         status.className = 'color-fg-muted text-small';
         status.setAttribute('role', 'status');
         panel.append(label, scan, clear, remove, status);
-        const anchor = toolbarAnchor(list);
-        if (anchor.position === 'after') anchor.node.after(panel);
-        else anchor.node.before(panel);
+        actions.classList.add('ghabd-actions-host');
+        actions.prepend(panel);
     }
 
     function enhance() {
         const ctx = context();
         const list = document.querySelector(LIST);
         if (!ctx || !list) return;
-        createControls(ctx, list);
+        createControls(ctx);
         for (const row of rows()) {
             const id = runId(row);
+            if (state(ctx).deleted.has(id)) {
+                row.remove();
+                continue;
+            }
             row.classList.add('ghabd-row');
             if (row.querySelector('.ghabd-check')) continue;
             const input = document.createElement('input');
@@ -326,6 +330,11 @@
                     await deleteRun(ctx, id);
                     s.deleted.add(id);
                     s.selected.delete(id);
+                    // Remove immediately rather than waiting for a page
+                    // refresh. Off-page runs are remembered in s.deleted.
+                    for (const row of rows()) {
+                        if (runId(row) === id) row.remove();
+                    }
                     removed++;
                 } catch (error) {
                     failures.push({ id, reason: error.message });
@@ -344,7 +353,7 @@
             ));
             show(ctx, failures.length
                 ? `Deleted ${removed}/${ids.length}; ${failures.length} failed and remain selected.`
-                : `Deleted ${removed}/${ids.length}. Deleted rows remain visible.`);
+                : `Deleted ${removed}/${ids.length}. Removed from list.`);
         } finally {
             s.busy = false;
             update();

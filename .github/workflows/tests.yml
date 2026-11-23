@@ -1,0 +1,21 @@
+name: Userscript tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Syntax and regression tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check userscript syntax
+        run: node --check github-actions-bulk-delete.user.js
+      - name: Test selection safety and pagination
+        run: node --test tests/userscript.test.cjs

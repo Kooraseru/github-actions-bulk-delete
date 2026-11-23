@@ -302,18 +302,54 @@
         update();
     }
 
-    // Select the results of the current repository Actions view, including
-    // additional pages and any active URL filters, using GitHub's same-origin HTML.
+    // Actions run lists are client-rendered; fetched HTML need not contain runs.
+    // Use GitHub's official paginated workflow-runs REST endpoints instead.
+    function scanRequest(ctx, view) {
+        const prefix = `/${ctx.owner}/${ctx.repo}/actions`;
+        if (!view.pathname.startsWith(prefix)) throw new Error('Not a repository Actions view');
+        const suffix = view.pathname.slice(prefix.length);
+        let endpoint = `/repos/${encodeURIComponent(ctx.owner)}/${encodeURIComponent(ctx.repo)}/actions`;
+        if (!suffix || suffix === '/') endpoint += '/runs';
+        else {
+            const workflow = /^\/workflows\/([^/]+)\/?$/.exec(suffix);
+            if (!workflow) throw new Error('All Time requires a workflow-runs listing');
+            endpoint += `/workflows/${encodeURIComponent(decodeURIComponent(workflow[1]))}/runs`;
+        }
+        const api = new URL(endpoint, 'https://api.github.com');
+        api.searchParams.set('per_page', '100');
+        const supported = new Set(['actor', 'branch', 'event', 'status', 'created', 'head_sha']);
+        for (const [key, value] of view.searchParams) {
+            if (key === 'page') continue;
+            if (key === 'query') {
+                const tokens = value.match(/(?:[^\s"]+|"[^"]*")+/g) || [];
+                for (const token of tokens) {
+                    const match = /^([a-z_]+):(.+)$/.exec(token);
+                    if (!match || !supported.has(match[1])) {
+                        throw new Error(`Unsupported Actions search: ${token}`);
+                    }
+                    api.searchParams.set(match[1], match[2].replace(/^"|"$/g, ''));
+                }
+            } else if (supported.has(key)) api.searchParams.set(key, value);
+            else throw new Error(`Unsupported Actions filter: ${key}`);
+        }
+        return api;
+    }
+    
     async function selectAllRuns(ctx) {
         const s = state(ctx);
         if (s.busy || s.scanning) return;
-        s.scanning = true;
-        update();
-        const ids = new Set();
-        let pageSize = 0;
         const view = new URL(location.href);
         view.searchParams.delete('page');
         view.hash = '';
+        let api;
+        try { api = scanRequest(ctx, view); }
+        catch (error) {
+            show(ctx, `Selection failed: ${error.message}`);
+            return;
+        }
+        s.scanning = true;
+        update();
+        const ids = new Set(), seen = new Set();
         try {
             for (let page = 1; page <= MAX_SCAN_PAGES; page++) {
                 const current = new URL(location.href);
@@ -322,40 +358,46 @@
                 if (current.href !== view.href || context()?.key !== ctx.key) {
                     throw new Error('Actions view changed; selection cancelled');
                 }
-                const url = new URL(view.href);
+                const url = new URL(api.href);
                 url.searchParams.set('page', String(page));
-                show(ctx, `Scanning runs: page ${page} (${ids.size} found)...`);
-                const response = await fetch(url, {
-                    method: 'GET', credentials: 'same-origin', redirect: 'follow',
-                    headers: { Accept: 'text/html' }, cache: 'no-store'
+                show(ctx, `Scanning page ${page} (${ids.size} runs)...`);
+                const response = await fetch(url.href, {
+                    method: 'GET', credentials: 'omit', redirect: 'error', cache: 'no-store',
+                    headers: { Accept: 'application/vnd.github+json',
+                        'X-GitHub-Api-Version': '2022-11-28' }
                 });
-                if (!response.ok || !response.headers.get('content-type')?.includes('text/html')) {
-                    throw new Error(`Could not read Actions page ${page} (HTTP ${response.status})`);
+                if (!response.ok) {
+                    const error = await response.json().catch(() => ({}));
+                    const detail = String(error.message || response.statusText || '').slice(0, 140);
+                    throw new Error(`GitHub REST HTTP ${response.status}${detail ? ': ' + detail : ''}`);
                 }
-                const returned = new URL(response.url);
-                if (returned.origin !== location.origin || returned.pathname !== view.pathname) {
-                    throw new Error('GitHub redirected the scan away from this Actions view');
+                const data = await response.json();
+                if (!Number.isSafeInteger(data?.total_count) ||
+                    !Array.isArray(data.workflow_runs)) {
+                    throw new Error('Unexpected GitHub workflow-runs API response');
                 }
-                const doc = new DOMParser().parseFromString(await response.text(), 'text/html');
-                const list = doc.querySelector(LIST);
-                if (!list) {
-                    if (page > 1) break;
-                    throw new Error('GitHub did not return a readable Actions list');
+                let added = 0;
+                for (const run of data.workflow_runs) {
+                    const id = String(run?.id ?? '');
+                    if (!/^\d+$/.test(id)) throw new Error('Invalid workflow-run ID returned by GitHub');
+                    if (!seen.has(id)) added++;
+                    seen.add(id);
+                    if (!s.deleted.has(id)) ids.add(id);
                 }
-                const pageIds = [...new Set([...list.querySelectorAll(ROW)].map(runId).filter(Boolean))];
-                if (pageIds.length === 0) break;
-                if (page === 1) pageSize = pageIds.length;
-                const count = ids.size;
-                for (const id of pageIds) if (!s.deleted.has(id)) ids.add(id);
-                if (ids.size === count) {
-                    throw new Error('GitHub repeated a page; all runs could not be verified');
+                if (data.workflow_runs.length > 0 && added === 0) {
+                    throw new Error('GitHub returned a repeated page');
                 }
-                if (pageIds.length < pageSize) break;
-                if (page === MAX_SCAN_PAGES) throw new Error('Too many pages; narrow the filter');
+                if (seen.size >= data.total_count || data.workflow_runs.length === 0 ||
+                    data.workflow_runs.length < 100) {
+                    if (seen.size < data.total_count) {
+                        throw new Error(`Incomplete scan (${seen.size}/${data.total_count}); narrow the filters`);
+                    }
+                    break;
+                }
+                if (page === MAX_SCAN_PAGES) throw new Error('Too many runs; narrow the filters');
             }
-            if (ids.size === 0) throw new Error('No workflow runs found');
             for (const id of ids) s.selected.add(id);
-            show(ctx, `Selected ${ids.size} runs across all matching pages.`);
+            show(ctx, ids.size ? `Selected ${ids.size} runs in the current view.` : 'No runs in the current view.');
         } catch (error) {
             show(ctx, `Selection failed: ${error.message}`);
             console.error('[GitHub Actions Bulk Delete] Scan:', error);
@@ -364,7 +406,7 @@
             update();
         }
     }
-
+    
     // GitHub's web DELETE endpoint uses the existing signed-in browser session.
     // No session cookies or personal access tokens are read or stored.
     function githubHeaders() {

@@ -2,7 +2,7 @@
 // @name         GitHub Actions Bulk Delete
 // @namespace    kooraseru
 // @author       kooraseru (https://github.com/Kooraseru)
-// @version      0.9.2
+// @version      0.9.3
 // @description  Select workflow runs across pages and delete them concurrently using your GitHub session.
 // @match        https://github.com/*/*/actions*
 // @updateURL    https://raw.githubusercontent.com/Kooraseru/github-actions-bulk-delete/main/github-actions-bulk-delete.user.js
@@ -27,25 +27,13 @@
 
     const css = document.createElement('style');
     css.textContent = `
-        /* Attach to GitHub's PageHeader actions, next to "New workflow". */
-        .ghabd-actions-host { display: flex !important; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
-        #ghabd-controls { display: inline-flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; max-width: 100%; }
-        #ghabd-controls input[type="checkbox"] { margin: 0; }
-        #ghabd-status { max-width: 280px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+        /* Only positioning: appearance comes from GitHub's native Primer CSS. */
+        .ghabd-actions-host { display: flex !important; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
+        #ghabd-controls { display: inline-flex; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: 8px; max-width: 100%; }
         #ghabd-select { position: relative; }
-        #ghabd-select-menu { position: absolute; z-index: 100; right: 0; top: calc(100% + 4px);
-            min-width: 190px; padding: 4px; border-radius: 6px;
-            border: 1px solid var(--borderColor-default, var(--color-border-default));
-            background: var(--bgColor-default, var(--color-canvas-default));
-            box-shadow: var(--shadow-floating-small, 0 8px 24px rgba(0, 0, 0, .18)); }
+        #ghabd-select-menu { position: absolute !important; top: calc(100% + 4px); right: 0; z-index: 1000; min-width: 200px; }
         #ghabd-select-menu[hidden] { display: none !important; }
-        #ghabd-select-menu [role="menuitem"] { display: block; width: 100%; border: 0;
-            padding: 8px 12px; border-radius: 4px; text-align: left; cursor: pointer;
-            color: var(--fgColor-default, var(--color-fg-default)); background: transparent; }
-        #ghabd-select-menu [role="menuitem"]:hover,
-        #ghabd-select-menu [role="menuitem"]:focus-visible {
-            background: var(--bgColor-muted, var(--color-canvas-subtle)); }
-        #ghabd-select-menu [role="menuitem"]:disabled { opacity: .5; cursor: not-allowed; }
+        #ghabd-status { max-width: 230px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
         .ghabd-row { position: relative !important; padding-left: 48px !important; }
         .ghabd-check { position: absolute !important; left: 16px !important; top: 50% !important;
             transform: translateY(-50%) !important; margin: 0 !important; width: 16px; height: 16px;
@@ -181,7 +169,7 @@
         if (old?.dataset.repo === ctx.key) {
             // A previously mounted panel may need relocating after a GitHub
             // client-side route change or header reconstruction.
-            if (old.parentElement !== actions) actions.prepend(old);
+            if (actions.lastElementChild !== old) actions.append(old);
             actions.classList.add('ghabd-actions-host');
             return;
         }
@@ -209,26 +197,58 @@
         path.setAttribute('d', 'm4.427 7.427 3.396 3.396a.25.25 0 0 0 .354 0l3.396-3.396A.25.25 0 0 0 11.396 7H4.604a.25.25 0 0 0-.177.427Z');
         arrow.append(path);
         toggle.append(arrow);
+        // Match the native Primer ActionMenu/ActionList markup supplied by GitHub.
         const menu = document.createElement('div');
         menu.id = 'ghabd-select-menu';
-        menu.setAttribute('role', 'menu');
-        menu.setAttribute('aria-label', 'Select workflow runs');
+        menu.dataset.component = 'ActionMenu.Overlay';
+        menu.className = 'prc-Overlay-Overlay-jfs-T';
+        menu.setAttribute('role', 'none');
+        menu.setAttribute('data-side', 'outside-bottom');
         menu.hidden = true;
+        const container = document.createElement('div');
+        container.className = 'prc-ActionMenu-ActionMenuContainer-Om1Qz';
+        container.dataset.variant = 'anchored';
+        const items = document.createElement('ul');
+        items.dataset.component = 'ActionList';
+        items.className = 'prc-ActionList-ActionList-rPFF2';
+        items.setAttribute('role', 'menu');
+        items.setAttribute('aria-labelledby', toggle.id);
+        items.dataset.variant = 'inset';
         const option = (id, title, action) => {
+            const li = document.createElement('li');
+            li.dataset.component = 'ActionList.Item';
+            li.className = 'prc-ActionList-ActionListItem-So4vC';
+            li.setAttribute('role', 'none');
             const item = document.createElement('button');
             item.id = id;
             item.type = 'button';
+            item.dataset.component = 'ActionList.Item.Button';
+            item.dataset.size = 'medium';
+            item.className = 'prc-ActionList-ActionListContent-KBb8-';
             item.setAttribute('role', 'menuitem');
-            item.textContent = title;
+            const spacer = document.createElement('span');
+            spacer.className = 'prc-ActionList-Spacer-4tR2m';
+            const sub = document.createElement('span');
+            sub.className = 'prc-ActionList-ActionListSubContent-gKsFp';
+            sub.dataset.component = 'ActionList.Item--DividerContainer';
+            const text = document.createElement('span');
+            text.className = 'prc-ActionList-ItemLabel-81ohH';
+            text.dataset.component = 'ActionList.Item.Label';
+            text.textContent = title;
+            sub.append(text);
+            item.append(spacer, sub);
             item.addEventListener('click', () => {
                 setMenuOpen(panel, false);
                 action();
             });
-            menu.append(item);
+            li.append(item);
+            items.append(li);
             return item;
         };
         option('ghabd-select-page', 'All on Page', () => selectVisible(ctx));
         option('ghabd-select-time', 'All Time', () => selectAllRuns(ctx));
+        container.append(items);
+        menu.append(container);
         toggle.addEventListener('click', () => {
             if (toggle.disabled) return;
             setMenuOpen(panel, menu.hidden);
@@ -248,7 +268,7 @@
         status.setAttribute('role', 'status');
         panel.append(chooser, clear, remove, status);
         actions.classList.add('ghabd-actions-host');
-        actions.prepend(panel);
+        actions.append(panel);
     }
 
     function enhance() {

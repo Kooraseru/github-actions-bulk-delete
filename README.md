@@ -2,48 +2,41 @@
   <h1>GitHub Actions Bulk Delete</h1>
 </div>
 
-Adds bulk selection and deletion of GitHub Actions workflow runs through a userscript, without requiring a personal access token.
+Select and delete workflow runs concurrently from a repository's GitHub Actions page. No personal access token is required – requests use your existing signed-in GitHub browser session.
 
-<a id="overview"></a>
-## Overview
-
-GitHub Actions Bulk Delete adds selection checkboxes and a batch deletion control to repository Actions pages.
-
-The userscript uses GitHub's existing browser session to send deletion requests to GitHub's web endpoint. It does not ask for or store personal access tokens. The interface reuses GitHub's Primer styles and controls, with minimal CSS for checkbox positioning.
-
-<a id="installation"></a>
 ## Installation
 
 Requires a userscript manager such as [Tampermonkey](https://www.tampermonkey.net/).
 
 [Install GitHub Actions Bulk Delete](https://github.com/Kooraseru/github-actions-bulk-delete/raw/refs/heads/main/github-actions-bulk-delete.user.js)
 
-The userscript specifies `@updateURL` and `@downloadURL` pointing to the raw file on the `main` branch. Tampermonkey can check for newer versions automatically according to its update settings. Increment the `@version` field when publishing updates.
+Automatic updates use the userscript's `@updateURL` and `@downloadURL`; the current version is **0.9.0**.
 
-<a id="behavior"></a>
-## Behavior
+## Usage
 
-The current implementation:
+The controls appear beside the Actions search toolbar instead of inside the workflow-run list.
 
-- Detects repository Actions pages.
-- Adds a checkbox to each loaded workflow run and an option to select all runs on the current page.
-- Preserves selection across dynamic list updates within the repository.
-- Displays the number of selected runs and requires one confirmation per batch.
-- Sends sequential DELETE requests using the existing GitHub browser session.
-- Reports deletion progress and stops on a failed request.
-- Refreshes the workflow list after successful requests.
-- Reuses GitHub's existing styles for buttons and other controls.
+- **All on page:** Check or uncheck the currently visible, non-deleted runs.
+- **Select all runs:** Scan every page of the current Actions view, respecting its URL filters. GitHub's same-origin HTML is read before selection is changed. Scanning stops on unexpected responses or repeated pages rather than silently claiming to have selected everything.
+- **Clear:** Uncheck the current selection without deleting anything.
+- **Delete selected:** Confirm the total once, then send up to **8 concurrent DELETE requests**. GitHub provides a per-run deletion endpoint, not an atomic bulk-delete request.
 
-Selection does not include workflow runs on other pages. Deleting a workflow run also removes its associated logs and artifacts. The script does not edit workflow definitions or repository files.
+Individual deletions succeed or fail independently. Successfully deleted rows stay in the current list, are dimmed, and have unchecked, disabled checkboxes; the script does not reload the page. Failed deletions remain selected for another attempt. Selecting runs across pages does not load those rows into the current list – only the current page's rows are displayed.
 
-<a id="compatibility"></a>
-## Compatibility
+Selection and deletion state are held per repository during the current page session. It is not persisted to disk.
 
-The userscript targets GitHub's repository Actions interface.
+## Background execution
 
-It depends on GitHub's rendered list structure, Primer styling, and internal session-authenticated deletion endpoint. GitHub can change any of these without notice. The deletion mechanism was reconstructed from browser network requests and has not been independently verified through a successful userscript deletion. Test with a disposable run before bulk deletion.
+**Concurrency is not durable background execution.** Multiple deletion requests can run simultaneously while the tab remains open, including when it is in the background. Closing or fully navigating away from the page may cancel outstanding requests, and the userscript has no ability to guarantee their completion. Guaranteed unattended cleanup requires a separate server-side GitHub Actions job with appropriate repository permissions.
 
-<a id="license"></a>
+## Compatibility and safety
+
+The userscript depends on GitHub's rendered Actions list, HTML pagination, Primer classes, the page's `fetch-nonce`, and GitHub's internal web deletion endpoint. These are not guaranteed stable APIs; a layout or authentication change can break discovery or deletion.
+
+The implementation deliberately fails closed on unreadable pages, unexpected redirects, and unsupported HTTP deletion responses. It does not collect or save session cookies, ask for a PAT, or change workflow definitions. Deleting a workflow run is permanent and removes its logs and artifacts. Use a disposable run to confirm that deletion still works against the live GitHub UI before deleting large batches.
+
+The selection, toolbar placement, concurrency, and success/failure behavior were exercised in a headless Chromium test with mocked GitHub HTML and responses. The authenticated live GitHub endpoint has not been tested here.
+
 ## License
 
-GitHub Actions Bulk Delete is distributed under the ISC License. [LICENSE](LICENSE).
+Distributed under the ISC License. [LICENSE](LICENSE).

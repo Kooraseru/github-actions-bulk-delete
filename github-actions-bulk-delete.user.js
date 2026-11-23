@@ -227,8 +227,8 @@
             menu.append(item);
             return item;
         };
-        option('ghabd-select-page', 'All on page', () => selectVisible(ctx));
-        option('ghabd-select-time', 'All time', () => selectAllRuns(ctx));
+        option('ghabd-select-page', 'All on Page', () => selectVisible(ctx));
+        option('ghabd-select-time', 'All Time', () => selectAllRuns(ctx));
         toggle.addEventListener('click', () => {
             if (toggle.disabled) return;
             setMenuOpen(panel, menu.hidden);

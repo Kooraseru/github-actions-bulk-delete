@@ -101,3 +101,75 @@ test('empty workflow listings return a useful status, not a false failure', asyn
   assert.equal(f.state.selected.size, 0);
   assert.equal(f.messages.at(-1), 'No runs in the current view.');
 });
+
+test('dropdown chevron stays inside its label and passive status is visually hidden', () => {
+  assert.match(script, /toggle\.querySelector\('\[data-component="text"\]'\)\.append\(arrow\)/);
+  assert.doesNotMatch(script, /trailing\.append\(arrow\)/);
+  assert.match(script, /status\.className = 'sr-only'/);
+  assert.doesNotMatch(script, /#ghabd-status\s*\{\s*max-width/);
+});
+
+function deletionFixture(ids, deleteRun) {
+  const begin = script.indexOf('async function deleteSelected(ctx) {');
+  const end = script.indexOf("    document.addEventListener('click', event => {", begin);
+  assert.ok(begin >= 0 && end > begin, 'Deletion function is independently testable');
+  const state = {
+    selected: new Set(ids.map(String)), deleted: new Set(),
+    busy: false, scanning: false, total: 0, completed: 0
+  };
+  const ctx = { owner: 'Demo', repo: 'Repo', key: 'Demo/Repo' };
+  let reloads = 0;
+  const reload = { reload: () => { reloads++; } };
+  const main = new Function('state', 'confirm', 'update', 'deleteRun', 'rows', 'runId',
+    'show', 'context', 'MAX_CONCURRENT_DELETES', 'location', 'console',
+    script.slice(begin, end) + '\nreturn deleteSelected;'
+  )(() => state, () => true, () => {}, deleteRun, () => [], () => null,
+    () => {}, () => ctx, 8, reload, { error() {} });
+  return { ctx, state, main, get reloads() { return reloads; } };
+}
+
+test('successful concurrent deletion refreshes once after all workers settle', async () => {
+  let active = 0, peak = 0, completed = 0;
+  const f = deletionFixture(Array.from({ length: 18 }, (_, index) => index + 1),
+    async () => {
+      active++;
+      peak = Math.max(peak, active);
+      await new Promise(resolve => setImmediate(resolve));
+      active--;
+      completed++;
+    });
+  await f.main(f.ctx);
+  assert.equal(peak, 8, 'bounded concurrency is preserved');
+  assert.equal(completed, 18);
+  assert.equal(f.reloads, 1);
+  assert.equal(f.state.selected.size, 0);
+  assert.equal(f.state.deleted.size, 18);
+  assert.equal(f.state.busy, false);
+});
+
+test('a failed run stays selected and suppresses reload for retry', async () => {
+  const f = deletionFixture(['1', '2', '3'], async (_ctx, id) => {
+    if (id === '2') throw Error('GitHub rejected this run');
+  });
+  await f.main(f.ctx);
+  assert.equal(f.reloads, 0);
+  assert.deepEqual([...f.state.selected], ['2']);
+  assert.deepEqual([...f.state.deleted].sort(), ['1', '3']);
+  assert.equal(f.state.busy, false);
+});
+
+test('cancelled deletion never invokes delete or refresh', async () => {
+  const begin = script.indexOf('async function deleteSelected(ctx) {');
+  const end = script.indexOf("    document.addEventListener('click', event => {", begin);
+  const ctx = { owner: 'Demo', repo: 'Repo', key: 'Demo/Repo' };
+  const state = { selected: new Set(['1']), deleted: new Set(), busy: false, scanning: false };
+  let deletions = 0, reloads = 0;
+  const fn = new Function('state', 'confirm', 'update', 'deleteRun', 'rows', 'runId',
+    'show', 'context', 'MAX_CONCURRENT_DELETES', 'location', 'console',
+    script.slice(begin, end) + '\nreturn deleteSelected;'
+  )(() => state, () => false, () => {}, async () => { deletions++; }, () => [],
+    () => null, () => {}, () => ctx, 8, { reload: () => reloads++ }, console);
+  await fn(ctx);
+  assert.equal(deletions, 0);
+  assert.equal(reloads, 0);
+});
